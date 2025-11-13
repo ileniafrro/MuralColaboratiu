@@ -1,0 +1,16 @@
+{
+  "name": "adobe-max-mural",
+  "version": "1.0.0",
+  "description": "Collaborative drawing application with real-time mural display",
+  "main": "server.js",
+  "private": true,
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "test": "echo \"No tests specified\""
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "socket.io": "^4.8.1"
+  }
+}

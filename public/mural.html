@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Max Collaborative Mural</title>
+  <script src="/socket.io/socket.io.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background-color: #b61207; /* 🔴 Color de fondo base igual al del marco */
+      background: linear-gradient(135deg, #b61207 0%, #cf1507 25%, #ec1000 50%, #cf1507 75%, #b61207 100%);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      padding: 20px;
+      overflow-x: hidden;
+    }
+    h1 {
+      color: white;
+      text-shadow: 2px 2px 8px rgba(0,0,0,0.4);
+      font-size: clamp(1.8rem, 5vw, 3rem);
+      text-align: center;
+      margin-bottom: 10px;
+    }
+    .subtitle { color: rgba(255,255,255,0.9); text-align: center; margin-bottom: 10px; }
+    .status, .timer {
+      display: inline-block;
+      padding: 8px 20px;
+      border-radius: 20px;
+      background: rgba(255,255,255,0.2);
+      color: white;
+      font-size: 0.9rem;
+      margin: 5px;
+      text-align: center;
+    }
+    .mural-container {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      flex: 1;
+      position: relative;
+    }
+    #mural-canvas {
+      background: #FFF9F0;
+      border-radius: 20px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+      max-width: 95%;
+      max-height: 80vh;
+      position: relative;
+      z-index: 1;
+    }
+    /* Marc del mode pantalla completa */
+    #fullscreen-frame {
+      display: none;
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      pointer-events: none;
+      z-index: 5;
+    }
+
+    .controls {
+      display: flex;
+      justify-content: center;
+      gap: 15px;
+      flex-wrap: wrap;
+      margin-top: 20px;
+    }
+    .btn {
+      padding: 12px 30px;
+      border: none;
+      border-radius: 50px;
+      font-weight: 600;
+      background: white;
+      color: #000000;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+    }
+    .btn:hover { transform: translateY(-3px); box-shadow: 0 8px 20px rgba(0,0,0,0.4); }
+
+    /* Modal */
+    .modal {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      background: rgba(0,0,0,0.7);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      z-index: 999;
+      visibility: hidden;
+      opacity: 0;
+      transition: all 0.3s ease;
+      padding: 10px;
+      pointer-events: none;
+    }
+    .modal.show {
+      visibility: visible;
+      opacity: 1;
+      pointer-events: all;
+    }
+    .modal-content {
+      position: relative;
+      background: white;
+      border-radius: 20px;
+      overflow: hidden;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      width: 90vw;
+      max-width: 1080px;
+      aspect-ratio: 1920 / 800;
+    }
+    .modal-content canvas {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+    .close-modal {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background: white;
+      border: none;
+      border-radius: 50%;
+      font-weight: bold;
+      padding: 8px 12px;
+      cursor: pointer;
+    }
+    #download-btn {
+      position: absolute;
+      bottom: 10px;
+      right: 50%;
+      transform: translateX(50%);
+      border-radius: 30px;
+      background: white;
+      font-weight: 600;
+      padding: 10px 20px;
+      border: none;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <h1>Max Collaborative Mural</h1>
+  <p class="subtitle">Watch as your doodles come alive</p>
+  <div style="text-align:center">
+    <div class="status" id="status">Loading...</div>
+    <div class="timer" id="timer">Simulation active</div>
+  </div>
+
+  <div class="mural-container" id="mural-container">
+    <canvas id="mural-canvas"></canvas>
+    <img id="fullscreen-frame" 
+         src="https://raw.githubusercontent.com/ileniafrro/randomImg/7d79ed25067c8fbed03446edcd480751150026e2/Captura%20de%20pantalla%202025-11-07%20114549.png" 
+         alt="Fullscreen Frame">
+  </div>
+
+  <div class="controls">
+    <button class="btn" onclick="location.href='/'">Add your art</button>
+    <button class="btn" id="fullscreen-btn">Fullscreen</button>
+    <button class="btn" id="share-mural">Share the mural</button>
+  </div>
+
+  <!-- Modal per compartir -->
+  <div class="modal" id="share-modal">
+    <div class="modal-content">
+      <canvas id="share-canvas"></canvas>
+      <button class="close-modal btn">✕</button>
+      <button id="download-btn" class="btn">Download</button>
+    </div>
+  </div>
+
+<script>
+const socket = io();
+const muralCanvas = document.getElementById("mural-canvas");
+const ctx = muralCanvas.getContext("2d");
+const statusEl = document.getElementById("status");
+const timerEl = document.getElementById("timer");
+const muralContainer = document.getElementById("mural-container");
+const frameImg = document.getElementById("fullscreen-frame");
+const fullscreenBtn = document.getElementById("fullscreen-btn");
+
+const CANVAS_WIDTH = 1920;
+const CANVAS_HEIGHT = 800;
+muralCanvas.width = CANVAS_WIDTH;
+muralCanvas.height = CANVAS_HEIGHT;
+
+let drawings = [];
+let countdown = 20;
+
+// --- Perlin noise suau ---
+function perlinNoise(x, y, t) {
+  return Math.sin(x * 0.03 + t * 0.8) * Math.cos(y * 0.03 + t * 0.7);
+}
+
+// --- Interacció ratolí ---
+const mouse = { x: null, y: null, active: false };
+muralCanvas.addEventListener("mousemove", (e) => {
+  const rect = muralCanvas.getBoundingClientRect();
+  mouse.x = ((e.clientX - rect.left) / rect.width) * CANVAS_WIDTH;
+  mouse.y = ((e.clientY - rect.top) / rect.height) * CANVAS_HEIGHT;
+  mouse.active = true;
+});
+muralCanvas.addEventListener("mouseleave", () => mouse.active = false);
+
+// --- Classe Doodle ---
+class Doodle {
+  constructor(id, data) {
+    this.id = id;
+    this.img = new Image();
+    this.img.src = data;
+    this.baseSize = 160 + Math.random() * 100;
+    this.size = this.baseSize;
+    this.x = Math.random() * (CANVAS_WIDTH - this.size);
+    this.y = Math.random() * (CANVAS_HEIGHT - this.size);
+    this.vx = (Math.random() - 0.5) * 1.8;
+    this.vy = (Math.random() - 0.5) * 1.8;
+  }
+
+  update() {
+    this.x += this.vx;
+    this.y += this.vy;
+
+    const visualPadding = this.size * 0.07;
+    if (this.x <= -visualPadding || this.x + this.size >= CANVAS_WIDTH + visualPadding)
+      this.vx *= -1;
+    if (this.y <= -visualPadding || this.y + this.size >= CANVAS_HEIGHT + visualPadding)
+      this.vy *= -1;
+
+    const drift = 0.05;
+    this.vx += (Math.random() - 0.5) * drift;
+    this.vy += (Math.random() - 0.5) * drift;
+    const maxSpeed = 1.2;
+    const speed = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
+    if (speed > maxSpeed) {
+      this.vx = (this.vx / speed) * maxSpeed;
+      this.vy = (this.vy / speed) * maxSpeed;
+    }
+    this.vx *= 0.99; this.vy *= 0.99;
+  }
+
+  draw(time) {
+    if (!this.img.complete) return;
+    const segs = 8;
+    const segSize = this.size / segs;
+    const deformIntensity = 4;
+    ctx.save();
+    ctx.globalAlpha = 0.97;
+    for (let i = 0; i < segs; i++) {
+      for (let j = 0; j < segs; j++) {
+        const sx = (this.img.width / segs) * i;
+        const sy = (this.img.height / segs) * j;
+        const dx = perlinNoise(this.x + i * 30, this.y + j * 30, time) * deformIntensity;
+        const dy = perlinNoise(this.y + j * 30, this.x + i * 30, time + 2) * deformIntensity;
+        ctx.drawImage(
+          this.img, sx, sy, this.img.width / segs, this.img.height / segs,
+          this.x + i * segSize + dx,
+          this.y + j * segSize + dy,
+          segSize, segSize
+        );
+      }
+    }
+    ctx.restore();
+  }
+}
+
+// --- Escalat automàtic ---
+function updateDoodleSizes() {
+  const n = drawings.length;
+  if (!n) return;
+  const scale = Math.max(0.3, Math.min(2.2, 2.2 - n * 0.05));
+  for (const d of drawings) d.size = d.baseSize * scale * (0.85 + Math.random() * 0.3);
+}
+
+// --- Animació ---
+function animate() {
+  const time = Date.now() * 0.001;
+  ctx.fillStyle = "#FFF9F0";
+  ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+  for (let i = 0; i < drawings.length; i++) {
+    const a = drawings[i]; a.update();
+    for (let j = i + 1; j < drawings.length; j++) {
+      const b = drawings[j];
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const minDist = (a.size + b.size) / 2.5;
+      if (dist < minDist) {
+        const overlap = minDist - dist;
+        const angle = Math.atan2(dy, dx);
+        const fx = Math.cos(angle) * overlap * 0.02;
+        const fy = Math.sin(angle) * overlap * 0.02;
+        a.vx -= fx; a.vy -= fy;
+        b.vx += fx; b.vy += fy;
+      }
+    }
+  }
+
+  // Repulsió del ratolí
+  if (mouse.active) {
+    const MOUSE_RADIUS = 200, MOUSE_FORCE = 0.08;
+    for (const d of drawings) {
+      const dx = d.x + d.size / 2 - mouse.x;
+      const dy = d.y + d.size / 2 - mouse.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < MOUSE_RADIUS) {
+        const angle = Math.atan2(dy, dx);
+        const f = (1 - dist / MOUSE_RADIUS) * MOUSE_FORCE;
+        d.vx += Math.cos(angle) * f;
+        d.vy += Math.sin(angle) * f;
+      }
+    }
+  }
+
+  drawings.forEach(d => d.draw(time));
+  requestAnimationFrame(animate);
+}
+
+// --- SOCKET.IO ---
+socket.on("drawing-added", (data) => {
+  drawings.push(new Doodle(Date.now(), data));
+  updateDoodleSizes();
+  statusEl.textContent = `${drawings.length} active drawings`;
+});
+socket.on("initial-drawings", (data) => {
+  drawings = data.map(d => new Doodle(d.id, d.data));
+  updateDoodleSizes();
+  statusEl.textContent = `${drawings.length} drawings loaded`;
+});
+
+// --- Pantalla completa ---
+fullscreenBtn.addEventListener("click", () => {
+  if (!document.fullscreenElement) muralContainer.requestFullscreen();
+  else document.exitFullscreen();
+});
+document.addEventListener("fullscreenchange", () => {
+  if (document.fullscreenElement) {
+    frameImg.style.display = "block"; // mostra el marc
+    muralCanvas.style.borderRadius = "0";
+    muralCanvas.style.boxShadow = "none";
+  } else {
+    frameImg.style.display = "none"; // amaga el marc
+    muralCanvas.style.borderRadius = "20px";
+    muralCanvas.style.boxShadow = "0 20px 60px rgba(0,0,0,0.4)";
+  }
+});
+
+// --- Share Modal ---
+const shareBtn = document.getElementById("share-mural");
+const modal = document.getElementById("share-modal");
+const shareCanvas = document.getElementById("share-canvas");
+const shareCtx = shareCanvas.getContext("2d");
+const closeModal = document.querySelector(".close-modal");
+const downloadBtn = document.getElementById("download-btn");
+
+shareBtn.addEventListener("click", () => {
+  modal.classList.add("show");
+  modal.style.display = "flex";
+  shareCanvas.width = muralCanvas.width;
+  shareCanvas.height = muralCanvas.height;
+  shareCtx.drawImage(muralCanvas, 0, 0);
+  const frame = new Image();
+  frame.crossOrigin = "anonymous";
+  frame.src = frameImg.src;
+  frame.onload = () => shareCtx.drawImage(frame, 0, 0, shareCanvas.width, shareCanvas.height);
+});
+closeModal.addEventListener("click", () => {
+  modal.classList.remove("show");
+  setTimeout(() => (modal.style.display = "none"), 300);
+});
+downloadBtn.addEventListener("click", () => {
+  const link = document.createElement("a");
+  link.download = "mural-capture.png";
+  link.href = shareCanvas.toDataURL("image/png");
+  link.click();
+});
+
+// --- Temporitzador ---
+function startTransformTimer() {
+  setInterval(() => {
+    countdown--;
+    timerEl.textContent = `Mural transformation in: ${countdown}s`;
+    if (countdown <= 0) {
+      countdown = 20;
+      statusEl.textContent = "Transformation finished!";
+      setTimeout(() => statusEl.textContent = `${drawings.length} drawings in the mural`, 2000);
+    }
+  }, 1000);
+}
+
+animate();
+startTransformTimer();
+</script>
+</body>
+</html>

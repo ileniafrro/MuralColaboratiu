@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Draw Your Art - Adobe Max Mural</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.0/fabric.min.js"></script>
+  <script src="/socket.io/socket.io.js"></script>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(135deg, #b61207 0%, #cf1507 25%, #ec1000 50%, #cf1507 75%, #b61207 100%);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      padding: 20px;
+      overflow-x: hidden;
+    }
+
+    .header {
+      text-align: center;
+      color: white;
+      margin-bottom: 20px;
+    }
+
+    h1 {
+      font-size: clamp(1.5rem, 5vw, 2.5rem);
+      text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+      margin-bottom: 10px;
+    }
+
+    .subtitle {
+      font-size: clamp(0.9rem, 3vw, 1.1rem);
+      opacity: 0.9;
+    }
+
+    .canvas-container-wrapper {
+      display: flex;
+      justify-content: center;
+      margin-bottom: 20px;
+      position: relative;
+    }
+
+    #canvas-wrapper {
+      background: white;
+      border-radius: 20px;
+      padding: 15px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+      position: relative;
+    }
+
+    canvas {
+      border-radius: 10px;
+      cursor: crosshair;
+      box-shadow: inset 0 2px 10px rgba(0,0,0,0.1);
+    }
+
+    .watercolor-effect {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      pointer-events: none;
+      border-radius: 20px;
+      background:
+        radial-gradient(ellipse at 10% 20%, rgba(253, 239, 132, 0.05), transparent 50%),
+        radial-gradient(ellipse at 80% 70%, rgba(120, 162, 255, 0.05), transparent 50%),
+        radial-gradient(ellipse at 50% 50%, rgba(255, 158, 168, 0.05), transparent 50%);
+    }
+
+    .toolbar {
+      display: flex;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 15px;
+      margin-bottom: 20px;
+    }
+
+    .tool-group {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: white;
+      padding: 10px 20px;
+      border-radius: 50px;
+      box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+    }
+
+    .color-btn {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      border: 3px solid white;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      box-shadow: 0 3px 8px rgba(0,0,0,0.2);
+    }
+
+    .color-btn:hover {
+      transform: scale(1.15);
+      box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+    }
+
+    .color-btn.active {
+      border-color: #333;
+      transform: scale(1.2);
+    }
+
+    .brush-size {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .brush-size label {
+      font-weight: 600;
+      color: 0;
+    }
+
+    input[type="range"] {
+      width: 120px;
+      height: 8px;
+      border-radius: 5px;
+      background: #ddd;
+      outline: none;
+      cursor: pointer;
+    }
+
+    input[type="range"]::-webkit-slider-thumb {
+      appearance: none;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: #667eea;
+      cursor: pointer;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+    }
+
+    .action-buttons {
+      display: flex;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 15px;
+    }
+
+    .btn {
+      padding: 15px 35px;
+      border: none;
+      border-radius: 50px;
+      font-size: 1.1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #471FDE 0%, #471FDE 100%);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 8px 20px rgba(0,0,0,0.3);
+    }
+
+    .btn-secondary {
+      background: white;
+      color: #000000;
+    }
+
+    .btn-secondary:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 8px 20px rgba(0,0,0,0.3);
+    }
+
+    .btn-danger {
+      background: #ff6b9d;
+      color: white;
+    }
+
+    .btn-danger:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 8px 20px rgba(0,0,0,0.3);
+    }
+
+    .modal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0,0,0,0.8);
+      z-index: 1000;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .modal.active {
+      display: flex;
+    }
+
+    .modal-content {
+      background: white;
+      padding: 40px;
+      border-radius: 20px;
+      text-align: center;
+      max-width: 90%;
+      max-height: 90%;
+      overflow: auto;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    }
+
+    .modal-content h2 {
+      color: #667eea;
+      margin-bottom: 20px;
+      font-size: 2rem;
+    }
+
+    .modal-content img {
+      max-width: 100%;
+      border-radius: 10px;
+      margin: 20px 0;
+      box-shadow: 0 5px 20px rgba(0,0,0,0.2);
+    }
+
+    .social-buttons {
+      display: flex;
+      justify-content: center;
+      gap: 15px;
+      flex-wrap: wrap;
+      margin-top: 20px;
+    }
+
+    .social-btn {
+      padding: 12px 25px;
+      border: none;
+      border-radius: 50px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .social-btn.twitter {
+      background: #1DA1F2;
+      color: white;
+    }
+
+    .social-btn.facebook {
+      background: #4267B2;
+      color: white;
+    }
+
+    .social-btn.download {
+      background: #10ac84;
+      color: white;
+    }
+
+    .social-btn:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+    }
+
+    @media (max-width: 768px) {
+      body {
+        padding: 10px;
+      }
+
+      .toolbar {
+        gap: 10px;
+      }
+
+      .tool-group {
+        padding: 8px 15px;
+      }
+
+      .color-btn {
+        width: 35px;
+        height: 35px;
+      }
+
+      .btn {
+        padding: 12px 25px;
+        font-size: 1rem;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Create Your Masterpiece</h1>
+    <p class="subtitle">Draw something amazing for the Adobe Max Mural</p>
+  </div>
+
+  <div class="canvas-container-wrapper">
+    <div id="canvas-wrapper">
+      <canvas id="canvas"></canvas>
+      <div class="watercolor-effect"></div>
+    </div>
+  </div>
+
+  <div class="toolbar">
+    <div class="tool-group">
+      <button class="color-btn active" style="background: #fd709f" data-color="#fd709f"></button>
+      <button class="color-btn" style="background: #ec0800" data-color="#ec0800"></button>
+      <button class="color-btn" style="background: #FBA11E" data-color="#FBA11E"></button>
+      <button class="color-btn" style="background: #00A462" data-color="#00A462"></button>
+      <button class="color-btn" style="background: #198AF3" data-color="#198AF3"></button>
+      <button class="color-btn" style="background: #471FDE" data-color="#471FDE"></button>
+      <button class="color-btn" style="background: #000000" data-color="#000000"></button>
+      <button class="color-btn" style="background: #FFFFFF" data-color="#FFFFFF"></button>
+    </div>
+
+    <div class="tool-group brush-size">
+      <label>Brush Size:</label>
+      <input type="range" id="brush-size" min="1" max="50" value="5">
+      <span id="size-value">5</span>
+    </div>
+  </div>
+
+  <div class="action-buttons">
+    <button class="btn btn-secondary" id="clear-btn">Clear Canvas</button>
+    <button class="btn btn-primary" id="finish-btn">Finished ✓</button>
+  </div>
+
+  <div class="modal" id="result-modal">
+    <div class="modal-content">
+      <div id="loading-content" style="display: flex; flex-direction: column; align-items: center; gap: 20px;">
+        <h2>Adding Your Art to the Mural...</h2>
+        <div style="width: 60px; height: 60px; border: 4px solid #ddd; border-top: 4px solid #667eea; border-radius: 50%; animation: spin 1s linear infinite;"></div>
+        <p style="color: #666;">Please wait while we render your masterpiece on the mural</p>
+      </div>
+      <div id="result-content" style="display: none;">
+        <h2>🎉 Your Art is Now on the Mural!</h2>
+        <img id="mural-snapshot" src="" alt="Mural with your drawing">
+        <div class="social-buttons">
+          <button class="social-btn twitter" id="share-twitter">
+            🐦 Share on Twitter
+          </button>
+          <button class="social-btn facebook" id="share-facebook">
+            📘 Share on Facebook
+          </button>
+          <button class="social-btn download" id="download-btn">
+            💾 Download Image
+          </button>
+        </div>
+        <button class="btn btn-primary" style="margin-top: 20px;" onclick="location.href='/'">Create Another</button>
+      </div>
+    </div>
+  </div>
+
+  <style>
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  </style>
+
+  <script>
+    const socket = io();
+
+    const canvasWidth = Math.min(window.innerWidth - 60, 800);
+    const canvasHeight = Math.min(window.innerHeight - 300, 600);
+
+    const canvas = new fabric.Canvas('canvas', {
+      isDrawingMode: true,
+      width: canvasWidth,
+      height: canvasHeight
+    });
+
+    canvas.freeDrawingBrush.color = '#FF6B9D';
+    canvas.freeDrawingBrush.width = 5;
+
+    document.querySelectorAll('.color-btn').forEach(btn => {
+      btn.addEventListener('click', function() {
+        document.querySelectorAll('.color-btn').forEach(b => b.classList.remove('active'));
+        this.classList.add('active');
+        canvas.freeDrawingBrush.color = this.dataset.color;
+      });
+    });
+
+    const brushSizeInput = document.getElementById('brush-size');
+    const sizeValue = document.getElementById('size-value');
+
+    brushSizeInput.addEventListener('input', function() {
+      canvas.freeDrawingBrush.width = parseInt(this.value);
+      sizeValue.textContent = this.value;
+    });
+
+    document.getElementById('clear-btn').addEventListener('click', () => {
+      if (confirm('Are you sure you want to clear your drawing?')) {
+        canvas.clear();
+        canvas.renderAll();
+      }
+    });
+
+    document.getElementById('finish-btn').addEventListener('click', async () => {
+      const drawingData = canvas.toDataURL('image/png');
+
+      socket.emit('new-drawing', drawingData);
+
+      setTimeout(() => {
+        window.location.href = '/mural.html';
+      }, 500);
+    });
+
+    document.getElementById('share-twitter').addEventListener('click', () => {
+      const text = encodeURIComponent('Check out my contribution to the #AdobeMaxMural! 🎨✨');
+      const url = encodeURIComponent(window.location.origin + '/mural.html');
+      window.open(`https://twitter.com/intent/tweet?text=${text}&url=${url}`, '_blank');
+    });
+
+    document.getElementById('share-facebook').addEventListener('click', () => {
+      const url = encodeURIComponent(window.location.origin + '/mural.html');
+      window.open(`https://www.facebook.com/sharer/sharer.php?u=${url}`, '_blank');
+    });
+
+    document.getElementById('download-btn').addEventListener('click', () => {
+      const img = document.getElementById('mural-snapshot');
+      const link = document.createElement('a');
+      link.download = 'adobe-max-mural.png';
+      link.href = img.src;
+      link.click();
+    });
+  </script>
+</body>
+</html>
